@@ -1,95 +1,8 @@
 use proc_macro2::{TokenStream};
-use combine::{parser, between, many, Parser, token};
 use quote::{format_ident, quote};
+use crate::bf_parser::Node;
 
-enum Node {
-    Inc,
-    Dec,
-    IncTapePos,
-    DecTapePos,
-    PutChar,
-    GetChar,
-    Loop(Vec<Node>)
-}
-
-impl Node {
-    fn to_token_stream(&self) -> TokenStream {
-        match self {
-            Node::Inc => quote!(tape[tape_pos] += 1;),
-            Node::Dec => quote!(tape[tape_pos] -= 1;),
-            Node::IncTapePos => quote!(tape_pos += 1;),
-            Node::DecTapePos => quote!(tape_pos -= 1;),
-            Node::PutChar => quote!(print!("{}", tape[tape_pos] as char);),
-            Node::GetChar => quote!(tape[tape_pos] = unsafe { libc::getchar() } as u8;),
-            Node::Loop(nodes) => {
-                let statements: TokenStream = nodes
-                    .iter()
-                    .map(|node| node.to_token_stream())
-                    .collect();
-
-                quote!(
-                    while tape[tape_pos as usize] != 0 {
-                        #statements
-                    }
-                )
-            }
-        }
-    }
-}
-
-
-fn parse_inc<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('+').map(|_| Node::Inc)
-}
-
-fn parse_dec<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('-').map(|_| Node::Dec)
-}
-
-fn parse_inc_tape_pos<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('>').map(|_| Node::IncTapePos)
-}
-
-fn parse_dec_tape_pos<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('<').map(|_| Node::DecTapePos)
-}
-
-fn parse_put_char<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('.').map(|_| Node::PutChar)
-}
-
-fn parse_get_char<'a>() -> impl Parser<&'a str, Output = Node> {
-    token(',').map(|_| Node::GetChar)
-}
-
-macro_rules! ref_parser {
-    ($parser_fn:ident) => {
-        parser(|input| {
-            let _: &mut &str = input;
-            $parser_fn().parse_stream(input).into_result()
-        })
-    }
-}
-
-fn primitive_parser<'a>() -> impl Parser<&'a str, Output = Node> {
-    parse_inc()
-        .or(parse_dec())
-        .or(parse_inc_tape_pos())
-        .or(parse_dec_tape_pos())
-        .or(parse_get_char())
-        .or(parse_put_char())
-        .or(ref_parser!(parse_loop))
-}
-
-fn parse_loop<'a>() -> impl Parser<&'a str, Output = Node> {
-    between(token('['), token(']'), many(primitive_parser()))
-        .map(|nodes: Vec<Node>| Node::Loop(nodes))
-}
-
-fn parse_bf(bf_string: &str) -> Vec<Node> {
-    let mut parser = many(primitive_parser()).map(|nodes: Vec<Node>| nodes);
-    parser.parse(bf_string).unwrap().0
-}
+mod bf_parser;
 
 #[proc_macro]
 pub fn bf(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -118,7 +31,7 @@ pub fn bf(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let literal_trimmed = literal.trim_matches('\"');
 
-    let parsed_ast = parse_bf(literal_trimmed);
+    let parsed_ast = bf_parser::parse_bf(literal_trimmed);
 
     let statements: TokenStream = parsed_ast
         .iter()
@@ -137,4 +50,29 @@ pub fn bf(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
     );
 
     proc_macro::TokenStream::from(pm2)
+}
+
+impl Node {
+    fn to_token_stream(&self) -> TokenStream {
+        match self {
+            Node::Inc => quote!(tape[tape_pos] += 1;),
+            Node::Dec => quote!(tape[tape_pos] -= 1;),
+            Node::IncTapePos => quote!(tape_pos += 1;),
+            Node::DecTapePos => quote!(tape_pos -= 1;),
+            Node::PutChar => quote!(print!("{}", tape[tape_pos] as char);),
+            Node::GetChar => quote!(tape[tape_pos] = unsafe { libc::getchar() } as u8;),
+            Node::Loop(nodes) => {
+                let statements: TokenStream = nodes
+                    .iter()
+                    .map(|node| node.to_token_stream())
+                    .collect();
+
+                quote!(
+                    while tape[tape_pos as usize] != 0 {
+                        #statements
+                    }
+                )
+            }
+        }
+    }
 }
