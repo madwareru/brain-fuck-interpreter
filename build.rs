@@ -13,7 +13,7 @@ fn main() {
 
     let mut s = String::with_capacity(1000000);
     s += "pub fn run_mandelbrot_generated() {\n";
-    s += "    let mut tape: Vec<u8> = Vec::with_capacity(0x100000); tape.resize(0x100000, 0);\n";
+    s += "    let mut tape: Vec<u8> = vec![0; 0x100000]; \n";
     s += "    let mut tape_pos = 0;\n";
 
     let mut iterator = MANDELBROT.iter();

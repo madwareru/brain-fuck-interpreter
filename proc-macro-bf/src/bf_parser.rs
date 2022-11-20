@@ -1,6 +1,11 @@
-use combine::{parser, between, many, Parser, token};
+use combine::{parser, between, many, Parser, token, choice};
+
+macro_rules! ref_parser {
+    ($foo:ident) => { parser(|input| { $foo().parse_stream(input).into_result() }) }
+}
 
 pub(crate) enum Node {
+    Root(Vec<Node>),
     Inc,
     Dec,
     IncTapePos,
@@ -10,55 +15,55 @@ pub(crate) enum Node {
     Loop(Vec<Node>)
 }
 
+fn parse_root<'a>() -> impl Parser<&'a str, Output = Node> {
+    many(parse_entry())
+        .map(|nodes: Vec<Node>| Node::Root(nodes))
+}
 fn parse_inc<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('+').map(|_| Node::Inc)
+    token('+')
+        .map(|_| Node::Inc)
 }
-
 fn parse_dec<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('-').map(|_| Node::Dec)
+    token('-')
+        .map(|_| Node::Dec)
 }
-
 fn parse_inc_tape_pos<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('>').map(|_| Node::IncTapePos)
+    token('>')
+        .map(|_| Node::IncTapePos)
 }
-
 fn parse_dec_tape_pos<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('<').map(|_| Node::DecTapePos)
+    token('<')
+        .map(|_| Node::DecTapePos)
 }
-
 fn parse_put_char<'a>() -> impl Parser<&'a str, Output = Node> {
-    token('.').map(|_| Node::PutChar)
+    token('.')
+        .map(|_| Node::PutChar)
 }
-
 fn parse_get_char<'a>() -> impl Parser<&'a str, Output = Node> {
-    token(',').map(|_| Node::GetChar)
+    token(',')
+        .map(|_| Node::GetChar)
 }
 
-macro_rules! ref_parser {
-    ($parser_fn:ident) => {
-        parser(|input| {
-            let _: &mut &str = input;
-            $parser_fn().parse_stream(input).into_result()
-        })
-    }
-}
-
-fn primitive_parser<'a>() -> impl Parser<&'a str, Output = Node> {
-    parse_inc()
-        .or(parse_dec())
-        .or(parse_inc_tape_pos())
-        .or(parse_dec_tape_pos())
-        .or(parse_get_char())
-        .or(parse_put_char())
-        .or(ref_parser!(parse_loop))
+fn parse_entry<'a>() -> impl Parser<&'a str, Output = Node> {
+    choice!(
+        parse_inc(),
+        parse_dec(),
+        parse_inc_tape_pos(),
+        parse_dec_tape_pos(),
+        parse_get_char(),
+        parse_put_char(),
+        ref_parser!(parse_loop)
+    )
 }
 
 fn parse_loop<'a>() -> impl Parser<&'a str, Output = Node> {
-    between(token('['), token(']'), many(primitive_parser()))
-        .map(|nodes: Vec<Node>| Node::Loop(nodes))
+    between(
+        token('['),
+        token(']'),
+        many(parse_entry())
+    ).map(|nodes: Vec<Node>| Node::Loop(nodes))
 }
 
-pub(crate) fn parse_bf(bf_string: &str) -> Vec<Node> {
-    let mut parser = many(primitive_parser()).map(|nodes: Vec<Node>| nodes);
-    parser.parse(bf_string).unwrap().0
+pub(crate) fn parse_bf(bf_string: &str) -> Node {
+    parse_root().parse(bf_string).unwrap().0
 }
