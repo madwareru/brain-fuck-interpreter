@@ -1,8 +1,8 @@
+use std::time::Instant;
 use proc_macro2::{TokenStream};
 use quote::{format_ident, quote};
 
-mod bf_parser;
-use bf_parser::{Node, parse_bf};
+use brain_fuck_parser::{Node, parse_bf};
 
 #[proc_macro]
 pub fn bf(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -30,21 +30,36 @@ pub fn bf(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
         _ => panic!("expected literal")
     };
 
-    let statements = parse_bf(literal.trim_matches('\"')).to_token_stream();
+    let instant = Instant::now();
+    let statements = if literal.starts_with('\"') {
+        parse_bf(literal.trim_matches('\"')).to_token_stream()
+    } else if literal.starts_with("r#") {
+        parse_bf((&literal[1..]).trim_matches('#').trim_matches('\"')).to_token_stream()
+    } else {
+        panic!("expected string literal");
+    };
+    let codegen_time = instant.elapsed().as_secs_f32();
 
     proc_macro::TokenStream::from(quote!(
         pub fn #foo_name() {
             let mut tape: Vec<u8> = vec![0; 0x100000];
             let mut tape_pos = 0;
             #statements
+            let codegen_time = #codegen_time;
+            println!("code generation time: {} seconds", codegen_time);
         }
     ))
 }
 
-impl Node {
-    fn to_token_stream(&self) -> TokenStream {
+trait ToTokenStream {
+    fn to_token_stream(&self) -> proc_macro2::TokenStream;
+}
+
+impl ToTokenStream for Node {
+    fn to_token_stream(&self) -> proc_macro2::TokenStream {
         match self {
             Node::Root(nodes) => nodes.iter().map(|node| node.to_token_stream()).collect(),
+            Node::Garbage => quote!(),
             Node::Inc => quote!(tape[tape_pos] += 1;),
             Node::Dec => quote!(tape[tape_pos] -= 1;),
             Node::IncTapePos => quote!(tape_pos += 1;),
