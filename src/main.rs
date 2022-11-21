@@ -153,7 +153,7 @@ mod codegen {
 
 #[cfg(not(feature = "use_codegen"))]
 mod interpreter {
-    const MANDELBROT: &[u8] = include_bytes!("mandelbrot.b");
+    use brain_fuck_parser::{Node, parse_bf};
 
     #[inline(always)]
     fn get_char_impl() -> u8 {
@@ -161,45 +161,76 @@ mod interpreter {
         c as u8
     }
 
+    const MANDELBROT: &str = include_str!("mandelbrot.b");
+
+    struct BfContext {
+        tape: Vec<u8>,
+        tape_pos: usize
+    }
+
+    impl BfContext {
+        fn parse(input: &str) -> (Self, Node) {
+            let root_node = parse_bf(input);
+            (
+                Self {
+                    tape: vec![0; 0x100000],
+                    tape_pos: 0
+                },
+                root_node
+            )
+        }
+
+        fn eval(&mut self, node: &Node) {
+            match node {
+                Node::Root(nodes) => {
+                    for node in nodes.iter() {
+                        self.eval(node);
+                    }
+                }
+                Node::Inc(amount) => {
+                    self.tape[self.tape_pos] += amount;
+                }
+                Node::Dec(amount) => {
+                    self.tape[self.tape_pos] -= amount;
+                }
+                Node::IncTapePos(amount) => {
+                    self.tape_pos += amount;
+                }
+                Node::DecTapePos(amount) => {
+                    self.tape_pos -= amount;
+                }
+                Node::PutChar => {
+                    print!("{}", self.tape[self.tape_pos] as char);
+                }
+                Node::GetChar => {
+                    self.tape[self.tape_pos] = get_char_impl();
+                }
+                Node::Clear => {
+                    self.tape[self.tape_pos] = 0;
+                }
+                Node::AddToNextAndClear => {
+                    self.tape[self.tape_pos + 1] += self.tape[self.tape_pos];
+                    self.tape[self.tape_pos] = 0;
+                }
+                Node::Comment => {}
+                Node::Loop(nodes) => {
+                    while self.tape[self.tape_pos] != 0 {
+                        for node in nodes.iter() {
+                            self.eval(node);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn run_mandelbrot() {
         run(MANDELBROT);
     }
 
-    fn run(code: &[u8]) {
-        let mut tape = Vec::with_capacity(0x100000);
-        tape.resize(0x100000, 0);
-        let mut code = code;
-        let mut tape_pos = 0;
-        run_step(&mut code, &mut tape, &mut tape_pos, false);
-    }
-
-    fn run_step(code: &mut &[u8], tape: &mut Vec<u8>, tape_pos: &mut usize, skip: bool) -> bool {
-        while (*code).len() > 0 {
-            match { (*code)[0] } {
-                b'[' => {
-                    *code = &(*code)[1..];
-                    let old_code = *code;
-                    while run_step(code, tape, tape_pos, tape[*tape_pos] == 0 ) {
-                        *code = old_code;
-                    }
-                },
-                b']' => { return tape[*tape_pos] != 0 },
-                code if !skip => {
-                    match code {
-                        b'+' => { tape[*tape_pos] += 1; },
-                        b'-' => { tape[*tape_pos] -= 1; },
-                        b'>' => { *tape_pos += 1 },
-                        b'<' => { *tape_pos -= 1; },
-                        b'.' => { print!("{}", tape[*tape_pos] as char); },
-                        b',' => { tape[*tape_pos] = get_char_impl(); },
-                        _ => ()
-                    }
-                },
-                _ => ()
-            }
-            *code = &(*code)[1..];
-        }
-        false
+    fn run(code: &str) {
+        let (mut ctx, root_node) = BfContext::parse(code);
+        ctx.eval(&root_node);
     }
 }
 

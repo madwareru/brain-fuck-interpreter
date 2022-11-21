@@ -10,4 +10,5 @@ use_codegen = []
 
 [dependencies]
 libc="0.2"
-proc-macro-bf={path="./proc-macro-bf"}
+proc-macro-bf = { path = "./proc-macro-bf" }
+brain-fuck-parser = { path = "./brain-fuck-parser" }

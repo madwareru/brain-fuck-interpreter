@@ -6,6 +6,7 @@ version = 3
 name = "brain-fuck-interpreter"
 version = "0.1.0"
 dependencies = [
+ "brain-fuck-parser",
  "libc",
  "proc-macro-bf",
 ]
