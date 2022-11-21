@@ -83,7 +83,7 @@ impl ToTokenStream for Node {
                     .collect();
 
                 quote!(
-                    while tape[tape_pos as usize] != 0 {
+                    while tape[tape_pos] != 0 {
                         #statements
                     }
                 )

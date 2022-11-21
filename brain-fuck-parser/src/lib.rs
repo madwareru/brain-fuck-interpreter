@@ -82,7 +82,6 @@ pub fn parse_bf(bf_string: &str) -> Node {
         .parse(bf_string)
         .unwrap().0
         .optimize_series()
-        .optimize_series() // there is a possible situation where it's useful
         .optimize_loops()
 }
 
@@ -95,15 +94,17 @@ impl Node {
                     match (node, new_nodes.last_mut()) {
                         // the loop after loop never runs. Eliminating:
                         (Node::Loop(_), Some(Node::Loop(_))) => {},
-
                         // eliminate anything suited as a commentary chars
                         (Node::Comment, _) => {},
-
                         // eliminate empty loops
                         (Node::Loop(loop_nodes), _) if loop_nodes.is_empty() => {},
-
-                        (Node::Loop(loop_nodes), _) if !loop_nodes.is_empty() => new_nodes.push(node.optimize_series()),
-
+                        (Node::Loop(loop_nodes), _) if !loop_nodes.is_empty() => {
+                            if let Node::Loop(optimized_nodes) = node.optimize_series() {
+                                if !optimized_nodes.is_empty() {
+                                    new_nodes.push(Node::Loop(optimized_nodes));
+                                }
+                            }
+                        },
                         // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
@@ -120,15 +121,17 @@ impl Node {
                     match (node, new_nodes.last_mut()) {
                         // the loop after loop never runs. Eliminating:
                         (Node::Loop(_), Some(Node::Loop(_))) => {},
-
                         // eliminate anything suited as a commentary chars
                         (Node::Comment, _) => {},
-
                         // eliminate empty loops
                         (Node::Loop(loop_nodes), _) if loop_nodes.is_empty() => {},
-
-                        (Node::Loop(loop_nodes), _) if !loop_nodes.is_empty() => new_nodes.push(node.optimize_series()),
-
+                        (Node::Loop(loop_nodes), _) if !loop_nodes.is_empty() => {
+                            if let Node::Loop(optimized_nodes) = node.optimize_series() {
+                                if !optimized_nodes.is_empty() {
+                                    new_nodes.push(Node::Loop(optimized_nodes));
+                                }
+                            }
+                        },
                         // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
@@ -179,13 +182,46 @@ mod tests {
     }
 
     #[test]
-    fn ensure_comments_work() {
-        let bf = parse_bf("clear:[-]");
+    fn ensure_sequential_loops_eliminates() {
+        let bf = parse_bf("[.][+]");
+        assert_eq!(Node::Root(vec![Node::Loop(vec![Node::PutChar])]), bf);
+
+        let bf = parse_bf("[-][+]");
         assert_eq!(Node::Root(vec![Node::Clear]), bf);
     }
 
     #[test]
-    fn ensure_node_add_to_next_and_clear_converges() {
+    fn ensure_empty_loops_eliminates() {
+        let bf = parse_bf("[]");
+        assert_eq!(Node::Root(vec![]), bf);
+
+        let bf = parse_bf("+[]+");
+        assert_eq!(Node::Root(vec![Node::Inc(2)]), bf);
+
+        let bf = parse_bf("[+[]+]");
+        assert_eq!(Node::Root(vec![Node::Loop(vec![Node::Inc(2)])]), bf);
+
+        let bf = parse_bf("[[]]");
+        assert_eq!(Node::Root(vec![]), bf);
+    }
+
+    #[test]
+    fn ensure_comments_work() {
+        let bf = parse_bf("clear:[-]");
+        assert_eq!(Node::Root(vec![Node::Clear]), bf);
+
+        let bf = parse_bf(".comment");
+        assert_eq!(Node::Root(vec![Node::PutChar]), bf);
+
+        let bf = parse_bf("comment");
+        assert_eq!(Node::Root(vec![]), bf);
+
+        let bf = parse_bf("[comment]");
+        assert_eq!(Node::Root(vec![]), bf);
+    }
+
+    #[test]
+    fn ensure_node_add_to_right_and_clear_converges() {
         let bf = parse_bf("[->+<]");
         assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear(1)]), bf);
 
@@ -194,7 +230,123 @@ mod tests {
     }
 
     #[test]
+    fn ensure_node_dec_from_right_and_clear_converges() {
+        let bf = parse_bf("[->-<]");
+        assert_eq!(Node::Root(vec![Node::DecFromTheRightAndClear(1)]), bf);
+
+        let bf = parse_bf("[>-<-]");
+        assert_eq!(Node::Root(vec![Node::DecFromTheRightAndClear(1)]), bf);
+    }
+
+    #[test]
+    fn ensure_simple_cases_work() {
+        let bf = parse_bf("++++[,]");
+        assert_eq!(Node::Root(vec![
+            Node::Inc(4),
+            Node::Loop(vec![Node::GetChar])
+        ]), bf);
+
+        let bf = parse_bf("++++[.]");
+        assert_eq!(Node::Root(vec![
+            Node::Inc(4),
+            Node::Loop(vec![Node::PutChar])
+        ]), bf);
+    }
+
+    #[test]
     fn ensure_node_series_converges() {
+        let bf = Node::PutChar;
+        let bf = bf.optimize_series();
+        assert_eq!(Node::PutChar, bf);
+
+        let bf = Node::GetChar;
+        let bf = bf.optimize_series();
+        assert_eq!(Node::GetChar, bf);
+
+        let bf = Node::Dec(1);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Dec(1), bf);
+
+        let bf = Node::Inc(1);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Inc(1), bf);
+
+        let bf = Node::IncTapePos(1);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::IncTapePos(1), bf);
+
+        let bf = Node::IncTapePosUntilEmpty;
+        let bf = bf.optimize_series();
+        assert_eq!(Node::IncTapePosUntilEmpty, bf);
+
+        let bf = Node::DecTapePos(1);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::DecTapePos(1), bf);
+
+        let bf = Node::DecTapePosUntilEmpty;
+        let bf = bf.optimize_series();
+        assert_eq!(Node::DecTapePosUntilEmpty, bf);
+
+        let bf = Node::Clear;
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Clear, bf);
+
+        let bf = Node::AddToTheRightAndClear(10);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::AddToTheRightAndClear(10), bf);
+
+        let bf = Node::DecFromTheRightAndClear(10);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::DecFromTheRightAndClear(10), bf);
+
+        let bf = Node::Root(vec![
+            Node::Inc(3), Node::Inc(8)
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::Inc(11)]), bf);
+
+        let bf = Node::Root(vec![
+            Node::Dec(3), Node::Dec(8)
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::Dec(11)]), bf);
+
+        let bf = Node::Root(vec![
+            Node::IncTapePos(3), Node::IncTapePos(8)
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::IncTapePos(11)]), bf);
+
+        let bf = Node::Root(vec![
+            Node::DecTapePos(3), Node::DecTapePos(8)
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::DecTapePos(11)]), bf);
+
+        let bf = Node::Root(vec![
+            Node::Loop(vec![Node::Inc(3), Node::Inc(8)])
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::Loop(vec![Node::Inc(11)])]), bf);
+
+        let bf = Node::Root(vec![
+            Node::Loop(vec![Node::Dec(3), Node::Dec(8)])
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::Loop(vec![Node::Dec(11)])]), bf);
+
+        let bf = Node::Root(vec![
+            Node::Loop(vec![Node::IncTapePos(3), Node::IncTapePos(8)])
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::Loop(vec![Node::IncTapePos(11)]) ]), bf);
+
+        let bf = Node::Root(vec![
+            Node::Loop(vec![Node::DecTapePos(3), Node::DecTapePos(8)])
+        ]);
+        let bf = bf.optimize_series();
+        assert_eq!(Node::Root(vec![Node::Loop(vec![Node::DecTapePos(11)])]), bf);
+
         let bf = parse_bf("+++++");
         assert_eq!(Node::Root(vec![Node::Inc(5)]), bf);
 
@@ -203,6 +355,12 @@ mod tests {
 
         let bf = parse_bf(">>>>>");
         assert_eq!(Node::Root(vec![Node::IncTapePos(5)]), bf);
+
+        let bf = parse_bf("[>]");
+        assert_eq!(Node::Root(vec![Node::IncTapePosUntilEmpty]), bf);
+
+        let bf = parse_bf("[<]");
+        assert_eq!(Node::Root(vec![Node::DecTapePosUntilEmpty]), bf);
 
         let bf = parse_bf("<<<<<");
         assert_eq!(Node::Root(vec![Node::DecTapePos(5)]), bf);
