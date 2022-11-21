@@ -199,6 +199,12 @@ mod interpreter {
                 Node::DecTapePos(amount) => {
                     self.tape_pos -= amount;
                 }
+                Node::IncTapePosUntilEmpty => {
+                    while self.tape[self.tape_pos] != 0 { self.tape_pos += 1; }
+                }
+                Node::DecTapePosUntilEmpty => {
+                    while self.tape[self.tape_pos] != 0 { self.tape_pos -= 1; }
+                }
                 Node::PutChar => {
                     print!("{}", self.tape[self.tape_pos] as char);
                 }
@@ -208,8 +214,12 @@ mod interpreter {
                 Node::Clear => {
                     self.tape[self.tape_pos] = 0;
                 }
-                Node::AddToNextAndClear => {
-                    self.tape[self.tape_pos + 1] += self.tape[self.tape_pos];
+                Node::AddToTheRightAndClear(offset) => {
+                    self.tape[self.tape_pos + offset] += self.tape[self.tape_pos];
+                    self.tape[self.tape_pos] = 0;
+                }
+                Node::DecFromTheRightAndClear(offset) => {
+                    self.tape[self.tape_pos + offset] -= self.tape[self.tape_pos];
                     self.tape[self.tape_pos] = 0;
                 }
                 Node::Comment => {}

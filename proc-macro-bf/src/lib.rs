@@ -63,11 +63,17 @@ impl ToTokenStream for Node {
             Node::Dec(dec_amount) => quote!(tape[tape_pos] -= #dec_amount;),
             Node::IncTapePos(inc_amount) => quote!(tape_pos += #inc_amount;),
             Node::DecTapePos(dec_amount) => quote!(tape_pos -= #dec_amount;),
+            Node::IncTapePosUntilEmpty => quote!( while tape[tape_pos] != 0 { tape_pos += 1; }),
+            Node::DecTapePosUntilEmpty => quote!( while tape[tape_pos] != 0 { tape_pos -= 1; }),
             Node::PutChar => quote!(print!("{}", tape[tape_pos] as char);),
             Node::GetChar => quote!(tape[tape_pos] = unsafe { libc::getchar() } as u8;),
             Node::Clear => quote!(tape[tape_pos] = 0;),
-            Node::AddToNextAndClear => quote!(
-                tape[tape_pos + 1] += tape[tape_pos];
+            Node::AddToTheRightAndClear(offset) => quote!(
+                tape[tape_pos + #offset] += tape[tape_pos];
+                tape[tape_pos] = 0;
+            ),
+            Node::DecFromTheRightAndClear(offset) => quote!(
+                tape[tape_pos + #offset] -= tape[tape_pos];
                 tape[tape_pos] = 0;
             ),
             Node::Loop(nodes) => {

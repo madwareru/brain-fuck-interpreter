@@ -11,10 +11,13 @@ pub enum Node {
     Dec(u8),
     IncTapePos(usize),
     DecTapePos(usize),
+    IncTapePosUntilEmpty,
+    DecTapePosUntilEmpty,
     PutChar,
     GetChar,
     Clear,
-    AddToNextAndClear,
+    AddToTheRightAndClear(usize),
+    DecFromTheRightAndClear(usize),
     Comment,
     Loop(Vec<Node>)
 }
@@ -79,6 +82,7 @@ pub fn parse_bf(bf_string: &str) -> Node {
         .parse(bf_string)
         .unwrap().0
         .optimize_series()
+        .optimize_series() // there is a possible situation where it's useful
         .optimize_loops()
 }
 
@@ -89,12 +93,22 @@ impl Node {
                 let mut new_nodes = Vec::with_capacity(nodes.len());
                 for node in nodes.iter() {
                     match (node, new_nodes.last_mut()) {
-                        (Node::Root(_), _) | (Node::Loop(_), _) => new_nodes.push(node.optimize_series()),
+                        // the loop after loop never runs. Eliminating:
+                        (Node::Loop(_), Some(Node::Loop(_))) => {},
+
+                        // eliminate anything suited as a commentary chars
+                        (Node::Comment, _) => {},
+
+                        // eliminate empty loops
+                        (Node::Loop(loop_nodes), _) if loop_nodes.is_empty() => {},
+
+                        (Node::Loop(loop_nodes), _) if !loop_nodes.is_empty() => new_nodes.push(node.optimize_series()),
+
+                        // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
                         (Node::IncTapePos(amount), Some(Node::IncTapePos(a))) => *a += amount,
                         (Node::DecTapePos(amount), Some(Node::DecTapePos(a))) => *a += amount,
-                        (Node::Comment, _) => {},
                         _  => new_nodes.push(node.clone()),
                     }
                 }
@@ -104,12 +118,22 @@ impl Node {
                 let mut new_nodes = Vec::with_capacity(nodes.len());
                 for node in nodes.iter() {
                     match (node, new_nodes.last_mut()) {
-                        (Node::Root(_), _) | (Node::Loop(_), _) => new_nodes.push(node.optimize_series()),
+                        // the loop after loop never runs. Eliminating:
+                        (Node::Loop(_), Some(Node::Loop(_))) => {},
+
+                        // eliminate anything suited as a commentary chars
+                        (Node::Comment, _) => {},
+
+                        // eliminate empty loops
+                        (Node::Loop(loop_nodes), _) if loop_nodes.is_empty() => {},
+
+                        (Node::Loop(loop_nodes), _) if !loop_nodes.is_empty() => new_nodes.push(node.optimize_series()),
+
+                        // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
                         (Node::IncTapePos(amount), Some(Node::IncTapePos(a))) => *a += amount,
                         (Node::DecTapePos(amount), Some(Node::DecTapePos(a))) => *a += amount,
-                        (Node::Comment, _) => {},
                         _  => new_nodes.push(node.clone()),
                     }
                 }
@@ -126,10 +150,16 @@ impl Node {
             Node::Loop(nodes) => {
                 match &nodes[..] {
                     &[Node::Dec(1)] => Node::Clear,
-                    &[Node::IncTapePos(1), Node::Inc(1), Node::DecTapePos(1), Node::Dec(1)]
-                        => Node::AddToNextAndClear,
-                    &[Node::Dec(1), Node::IncTapePos(1), Node::Inc(1), Node::DecTapePos(1)]
-                        => Node::AddToNextAndClear,
+                    &[Node::IncTapePos(1)] => Node::IncTapePosUntilEmpty,
+                    &[Node::DecTapePos(1)] => Node::DecTapePosUntilEmpty,
+                    &[Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl), Node::Dec(1)]
+                        if shr == shl => Node::AddToTheRightAndClear(shr),
+                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl)]
+                    if shr == shl => Node::AddToTheRightAndClear(shr),
+                    &[Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl), Node::Dec(1)]
+                    if shr == shl => Node::DecFromTheRightAndClear(shr),
+                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl)]
+                    if shr == shl => Node::DecFromTheRightAndClear(shr),
                     _ => Node::Loop(nodes.iter().map(|it| it.optimize_loops()).collect())
                 }
             }
@@ -157,10 +187,10 @@ mod tests {
     #[test]
     fn ensure_node_add_to_next_and_clear_converges() {
         let bf = parse_bf("[->+<]");
-        assert_eq!(Node::Root(vec![Node::AddToNextAndClear]), bf);
+        assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear]), bf);
 
         let bf = parse_bf("[>+<-]");
-        assert_eq!(Node::Root(vec![Node::AddToNextAndClear]), bf);
+        assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear]), bf);
     }
 
     #[test]
