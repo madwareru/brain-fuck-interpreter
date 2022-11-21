@@ -59,13 +59,17 @@ impl ToTokenStream for Node {
     fn to_token_stream(&self) -> proc_macro2::TokenStream {
         match self {
             Node::Root(nodes) => nodes.iter().map(|node| node.to_token_stream()).collect(),
-            Node::Garbage => quote!(),
-            Node::Inc => quote!(tape[tape_pos] += 1;),
-            Node::Dec => quote!(tape[tape_pos] -= 1;),
-            Node::IncTapePos => quote!(tape_pos += 1;),
-            Node::DecTapePos => quote!(tape_pos -= 1;),
+            Node::Inc(inc_amount) => quote!(tape[tape_pos] += #inc_amount;),
+            Node::Dec(dec_amount) => quote!(tape[tape_pos] -= #dec_amount;),
+            Node::IncTapePos(inc_amount) => quote!(tape_pos += #inc_amount;),
+            Node::DecTapePos(dec_amount) => quote!(tape_pos -= #dec_amount;),
             Node::PutChar => quote!(print!("{}", tape[tape_pos] as char);),
             Node::GetChar => quote!(tape[tape_pos] = unsafe { libc::getchar() } as u8;),
+            Node::Clear => quote!(tape[tape_pos] = 0;),
+            Node::AddToNextAndClear => quote!(
+                tape[tape_pos + 1] += tape[tape_pos];
+                tape[tape_pos] = 0;
+            ),
             Node::Loop(nodes) => {
                 let statements: TokenStream = nodes
                     .iter()
@@ -77,7 +81,8 @@ impl ToTokenStream for Node {
                         #statements
                     }
                 )
-            }
+            },
+            Node::Comment => unreachable!(),
         }
     }
 }
