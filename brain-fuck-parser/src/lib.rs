@@ -187,10 +187,10 @@ mod tests {
     #[test]
     fn ensure_node_add_to_next_and_clear_converges() {
         let bf = parse_bf("[->+<]");
-        assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear]), bf);
+        assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear(1)]), bf);
 
         let bf = parse_bf("[>+<-]");
-        assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear]), bf);
+        assert_eq!(Node::Root(vec![Node::AddToTheRightAndClear(1)]), bf);
     }
 
     #[test]
