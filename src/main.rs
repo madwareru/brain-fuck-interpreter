@@ -153,7 +153,7 @@ mod codegen {
 
 #[cfg(not(feature = "use_codegen"))]
 mod interpreter {
-    use brain_fuck_parser::{Node, parse_bf};
+    use brain_fuck_parser::{parse_bf, SimOperation};
 
     #[inline(always)]
     fn get_char_impl() -> u8 {
@@ -169,65 +169,68 @@ mod interpreter {
     }
 
     impl BfContext {
-        fn parse(input: &str) -> (Self, Node) {
+        fn parse(input: &str) -> (Self, Vec<SimOperation>) {
             let root_node = parse_bf(input);
             (
                 Self {
                     tape: vec![0; 0x100000],
                     tape_pos: 0
                 },
-                root_node
+                root_node.linearize()
             )
         }
 
-        fn eval(&mut self, node: &Node) {
-            match node {
-                Node::Root(nodes) => {
-                    for node in nodes.iter() {
-                        self.eval(node);
+        fn eval(&mut self, ops: &[SimOperation], start_id: usize, end_id: usize) {
+            for i in start_id..=end_id {
+                let node = ops[i];
+                match node {
+                    SimOperation::Inc(amount) => {
+                        self.tape[self.tape_pos] = self.tape[self.tape_pos].wrapping_add(amount) ;
                     }
-                }
-                Node::Inc(amount) => {
-                    self.tape[self.tape_pos] += amount;
-                }
-                Node::Dec(amount) => {
-                    self.tape[self.tape_pos] -= amount;
-                }
-                Node::IncTapePos(amount) => {
-                    self.tape_pos += amount;
-                }
-                Node::DecTapePos(amount) => {
-                    self.tape_pos -= amount;
-                }
-                Node::IncTapePosUntilEmpty => {
-                    while self.tape[self.tape_pos] != 0 { self.tape_pos += 1; }
-                }
-                Node::DecTapePosUntilEmpty => {
-                    while self.tape[self.tape_pos] != 0 { self.tape_pos -= 1; }
-                }
-                Node::PutChar => {
-                    print!("{}", self.tape[self.tape_pos] as char);
-                }
-                Node::GetChar => {
-                    self.tape[self.tape_pos] = get_char_impl();
-                }
-                Node::Clear => {
-                    self.tape[self.tape_pos] = 0;
-                }
-                Node::AddToTheRightAndClear(offset) => {
-                    self.tape[self.tape_pos + offset] += self.tape[self.tape_pos];
-                    self.tape[self.tape_pos] = 0;
-                }
-                Node::DecFromTheRightAndClear(offset) => {
-                    self.tape[self.tape_pos + offset] -= self.tape[self.tape_pos];
-                    self.tape[self.tape_pos] = 0;
-                }
-                Node::Comment => {}
-                Node::Loop(nodes) => {
-                    while self.tape[self.tape_pos] != 0 {
-                        for node in nodes.iter() {
-                            self.eval(node);
+                    SimOperation::Dec(amount) => {
+                        self.tape[self.tape_pos] = self.tape[self.tape_pos].wrapping_sub(amount);
+                    }
+                    SimOperation::IncTapePos(offset) => {
+                        self.tape_pos += offset;
+                    }
+                    SimOperation::DecTapePos(offset) => {
+                        self.tape_pos -= offset;
+                    }
+                    SimOperation::IncTapePosUntilEmpty => {
+                        while self.tape[self.tape_pos] != 0 { self.tape_pos += 1; }
+                    }
+                    SimOperation::DecTapePosUntilEmpty => {
+                        while self.tape[self.tape_pos] != 0 { self.tape_pos -= 1; }
+                    }
+                    SimOperation::PutChar => {
+                        print!("{}", self.tape[self.tape_pos] as char);
+                    }
+                    SimOperation::GetChar => {
+                        self.tape[self.tape_pos] = get_char_impl();
+                    }
+                    SimOperation::Clear => {
+                        self.tape[self.tape_pos] = 0;
+                    }
+                    SimOperation::Set(amount) => {
+                        self.tape[self.tape_pos] = amount;
+                    }
+                    SimOperation::AddToTheRightAndClear(offset) => {
+                        self.tape[self.tape_pos + offset] =
+                            self.tape[self.tape_pos + offset].wrapping_add(self.tape[self.tape_pos]);
+                        self.tape[self.tape_pos] = 0;
+                    }
+                    SimOperation::DecFromTheRightAndClear(offset) => {
+                        self.tape[self.tape_pos + offset] =
+                            self.tape[self.tape_pos + offset].wrapping_sub(self.tape[self.tape_pos]);
+                        self.tape[self.tape_pos] = 0;
+                    }
+                    SimOperation::Loop { start_id, end_id } => {
+                        while self.tape[self.tape_pos] != 0 {
+                            self.eval(ops, start_id, end_id);
                         }
+                    }
+                    SimOperation::EndProgram => {
+                        return;
                     }
                 }
             }
@@ -239,8 +242,8 @@ mod interpreter {
     }
 
     fn run(code: &str) {
-        let (mut ctx, root_node) = BfContext::parse(code);
-        ctx.eval(&root_node);
+        let (mut ctx, sim_ops) = BfContext::parse(code);
+        ctx.eval(&sim_ops, 0, sim_ops.len()-1);
     }
 }
 

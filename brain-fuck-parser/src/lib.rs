@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use combine::{parser, between, many, Parser, token, choice, none_of};
 
 macro_rules! ref_parser {
@@ -16,10 +17,160 @@ pub enum Node {
     PutChar,
     GetChar,
     Clear,
+    Set(u8),
     AddToTheRightAndClear(usize),
     DecFromTheRightAndClear(usize),
     Comment,
     Loop(Vec<Node>)
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum SimOperation {
+    Inc(u8),
+    Dec(u8),
+    IncTapePos(usize),
+    DecTapePos(usize),
+    IncTapePosUntilEmpty,
+    DecTapePosUntilEmpty,
+    PutChar,
+    GetChar,
+    Clear,
+    Set(u8),
+    AddToTheRightAndClear(usize),
+    DecFromTheRightAndClear(usize),
+    Loop{ start_id: usize, end_id: usize },
+    EndProgram
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum NumberedNode {
+    Root( Vec<NumberedNode> ),
+    Loop{ id: usize, operations: Vec<NumberedNode> },
+    Operation { id: usize, data: SimOperation }
+}
+
+impl NumberedNode {
+    fn get_id(&self) -> usize {
+        match self {
+            NumberedNode::Loop { id, .. } => *id,
+            NumberedNode::Operation { id, .. } => *id,
+            _ => unreachable!()
+        }
+    }
+
+    fn try_from(source: &Node) -> Option<Self> {
+        match source {
+            Node::Root(nodes) => {
+                let mut nodes: Vec<NumberedNode> = nodes
+                    .iter()
+                    .filter_map(|it| NumberedNode::try_from(it))
+                    .collect();
+                nodes.push(NumberedNode::Operation { id: 0, data: SimOperation::EndProgram });
+                Some(Self::Root(nodes))
+            }
+            Node::Inc(amount) => {
+                Some(Self::Operation { id: 0, data: SimOperation::Inc(*amount) })
+            }
+            Node::Dec(amount) => {
+                Some(Self::Operation { id: 0, data: SimOperation::Dec(*amount) })
+            }
+            Node::IncTapePos(offset) => {
+                Some(Self::Operation { id: 0, data: SimOperation::IncTapePos(*offset) })
+            }
+            Node::DecTapePos(offset) => {
+                Some(Self::Operation { id: 0, data: SimOperation::DecTapePos(*offset) })
+            }
+            Node::IncTapePosUntilEmpty => {
+                Some(Self::Operation { id: 0, data: SimOperation::IncTapePosUntilEmpty })
+            }
+            Node::DecTapePosUntilEmpty => {
+                Some(Self::Operation { id: 0, data: SimOperation::DecTapePosUntilEmpty })
+            }
+            Node::PutChar => {
+                Some(Self::Operation { id: 0, data: SimOperation::PutChar })
+            }
+            Node::GetChar => {
+                Some(Self::Operation { id: 0, data: SimOperation::GetChar })
+            }
+            Node::Clear => {
+                Some(Self::Operation { id: 0, data: SimOperation::Clear })
+            }
+            Node::Set(amount) => {
+                Some(Self::Operation { id: 0, data: SimOperation::Set(*amount) })
+            }
+            Node::AddToTheRightAndClear(offset) => {
+                Some(Self::Operation { id: 0, data: SimOperation::AddToTheRightAndClear(*offset) })
+            }
+            Node::DecFromTheRightAndClear(offset) => {
+                Some(Self::Operation { id: 0, data: SimOperation::DecFromTheRightAndClear(*offset) })
+            }
+            Node::Loop(nodes) => {
+                let operations = nodes
+                    .iter()
+                    .filter_map(|it| NumberedNode::try_from(it))
+                    .collect();
+                Some(Self::Loop { id: 0, operations })
+            }
+            _ => None
+        }
+    }
+
+    pub fn numerize(root_node: &mut Self) -> usize {
+        let mut id_sequence = 0;
+        let mut queue = VecDeque::new();
+        if let Self::Root(nodes) = root_node {
+            for child_node in nodes.iter_mut() {
+                queue.push_back(child_node);
+            }
+        }
+        while let Some(next_node) = queue.pop_front() {
+            match next_node {
+                NumberedNode::Loop { id, operations } => {
+                    *id = id_sequence;
+                    id_sequence += 1;
+                    for op_node in operations.iter_mut() {
+                        queue.push_back(op_node);
+                    }
+                }
+                NumberedNode::Operation { id, .. } => {
+                    *id = id_sequence;
+                    id_sequence += 1;
+                }
+                _ => unreachable!()
+            }
+        }
+        id_sequence
+    }
+
+    fn linearize(root_node: &Self, capacity: usize) -> Vec<SimOperation> {
+        let mut result = vec![SimOperation::EndProgram; capacity];
+        let mut queue = VecDeque::new();
+        if let Self::Root(nodes) = root_node {
+            for child_node in nodes.iter() {
+                queue.push_back(child_node);
+            }
+        }
+        while let Some(next_node) = queue.pop_front() {
+            match next_node {
+                NumberedNode::Loop { operations, id } => {
+                    if !operations.is_empty() {
+                        let start_id = operations.first().unwrap().get_id();
+                        let end_id = operations.last().unwrap().get_id();
+                        result[*id] = SimOperation::Loop { start_id, end_id };
+
+                        for op_node in operations.iter() {
+                            queue.push_back(op_node);
+                        }
+                    }
+                }
+                NumberedNode::Operation { data, id } => {
+                    result[*id] = *data;
+                }
+                _ => unreachable!()
+            }
+        }
+        result
+    }
 }
 
 fn parse_root<'a>() -> impl Parser<&'a str, Output = Node> {
@@ -105,6 +256,7 @@ impl Node {
                                 }
                             }
                         },
+                        (Node::Inc(amount), Some(last_node)) if last_node.is_clear_node() => *last_node = Node::Set(*amount),
                         // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
@@ -132,6 +284,7 @@ impl Node {
                                 }
                             }
                         },
+                        (Node::Inc(amount), Some(last_node)) if last_node.is_clear_node() => *last_node = Node::Set(*amount),
                         // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
@@ -168,6 +321,14 @@ impl Node {
             }
             _ => self.clone()
         }
+    }
+    pub fn linearize(&self) -> Vec<SimOperation> {
+        let mut new_tree = NumberedNode::try_from(self).unwrap();
+        let capacity = NumberedNode::numerize(&mut new_tree);
+        NumberedNode::linearize(&new_tree, capacity)
+    }
+    fn is_clear_node(&self) -> bool {
+        if let Node::Clear = self { true } else { false }
     }
 }
 

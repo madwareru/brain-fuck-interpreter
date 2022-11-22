@@ -68,6 +68,7 @@ impl ToTokenStream for Node {
             Node::PutChar => quote!(print!("{}", tape[tape_pos] as char);),
             Node::GetChar => quote!(tape[tape_pos] = unsafe { libc::getchar() } as u8;),
             Node::Clear => quote!(tape[tape_pos] = 0;),
+            Node::Set(amount) => quote!(tape[tape_pos] = #amount;),
             Node::AddToTheRightAndClear(offset) => quote!(
                 tape[tape_pos + #offset] += tape[tape_pos];
                 tape[tape_pos] = 0;
