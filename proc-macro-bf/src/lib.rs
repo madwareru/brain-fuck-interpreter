@@ -68,7 +68,6 @@ impl ToTokenStream for Node {
             Node::PutChar => quote!(print!("{}", tape[tape_pos] as char);),
             Node::GetChar => quote!(tape[tape_pos] = unsafe { libc::getchar() } as u8;),
             Node::Clear => quote!(tape[tape_pos] = 0;),
-            Node::Set(amount) => quote!(tape[tape_pos] = #amount;),
             Node::AddToTheRightAndClear(offset) => quote!(
                 tape[tape_pos + #offset] += tape[tape_pos];
                 tape[tape_pos] = 0;
@@ -76,6 +75,18 @@ impl ToTokenStream for Node {
             Node::DecFromTheRightAndClear(offset) => quote!(
                 tape[tape_pos + #offset] -= tape[tape_pos];
                 tape[tape_pos] = 0;
+            ),
+            Node::AddToTheLeftAndClear(offset) => quote!(
+                if tape[tape_pos] != 0 {
+                    tape[tape_pos - #offset] += tape[tape_pos];
+                    tape[tape_pos] = 0;
+                }
+            ),
+            Node::DecFromTheLeftAndClear(offset) => quote!(
+                if tape[tape_pos] != 0 {
+                    tape[tape_pos - #offset] -= tape[tape_pos];
+                    tape[tape_pos] = 0;
+                }
             ),
             Node::Loop(nodes) => {
                 let statements: TokenStream = nodes

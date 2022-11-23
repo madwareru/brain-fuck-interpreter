@@ -17,9 +17,10 @@ pub enum Node {
     PutChar,
     GetChar,
     Clear,
-    Set(u8),
     AddToTheRightAndClear(usize),
     DecFromTheRightAndClear(usize),
+    AddToTheLeftAndClear(usize),
+    DecFromTheLeftAndClear(usize),
     Comment,
     Loop(Vec<Node>)
 }
@@ -35,9 +36,10 @@ pub enum SimOperation {
     PutChar,
     GetChar,
     Clear,
-    Set(u8),
     AddToTheRightAndClear(usize),
     DecFromTheRightAndClear(usize),
+    AddToTheLeftAndClear(usize),
+    DecFromTheLeftAndClear(usize),
     Loop{ start_id: usize, end_id: usize },
     EndProgram
 }
@@ -95,14 +97,17 @@ impl NumberedNode {
             Node::Clear => {
                 Some(Self::Operation { id: 0, data: SimOperation::Clear })
             }
-            Node::Set(amount) => {
-                Some(Self::Operation { id: 0, data: SimOperation::Set(*amount) })
-            }
             Node::AddToTheRightAndClear(offset) => {
                 Some(Self::Operation { id: 0, data: SimOperation::AddToTheRightAndClear(*offset) })
             }
             Node::DecFromTheRightAndClear(offset) => {
                 Some(Self::Operation { id: 0, data: SimOperation::DecFromTheRightAndClear(*offset) })
+            }
+            Node::AddToTheLeftAndClear(offset) => {
+                Some(Self::Operation { id: 0, data: SimOperation::AddToTheLeftAndClear(*offset) })
+            }
+            Node::DecFromTheLeftAndClear(offset) => {
+                Some(Self::Operation { id: 0, data: SimOperation::DecFromTheLeftAndClear(*offset) })
             }
             Node::Loop(nodes) => {
                 let operations = nodes
@@ -111,7 +116,7 @@ impl NumberedNode {
                     .collect();
                 Some(Self::Loop { id: 0, operations })
             }
-            _ => None
+            Node::Comment => None
         }
     }
 
@@ -256,7 +261,6 @@ impl Node {
                                 }
                             }
                         },
-                        (Node::Inc(amount), Some(last_node)) if last_node.is_clear_node() => *last_node = Node::Set(*amount),
                         // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
@@ -284,7 +288,6 @@ impl Node {
                                 }
                             }
                         },
-                        (Node::Inc(amount), Some(last_node)) if last_node.is_clear_node() => *last_node = Node::Set(*amount),
                         // join sequential incs, decs, as well as tape position shifts
                         (Node::Inc(amount), Some(Node::Inc(a))) => *a += amount,
                         (Node::Dec(amount), Some(Node::Dec(a))) => *a += amount,
@@ -298,6 +301,7 @@ impl Node {
             _ => self.clone()
         }
     }
+
     fn optimize_loops(&self) -> Self {
         match self {
             Node::Root(nodes) => {
@@ -308,27 +312,46 @@ impl Node {
                     &[Node::Dec(1)] => Node::Clear,
                     &[Node::IncTapePos(1)] => Node::IncTapePosUntilEmpty,
                     &[Node::DecTapePos(1)] => Node::DecTapePosUntilEmpty,
-                    &[Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl), Node::Dec(1)]
-                        if shr == shl => Node::AddToTheRightAndClear(shr),
-                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl)]
-                    if shr == shl => Node::AddToTheRightAndClear(shr),
-                    &[Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl), Node::Dec(1)]
-                    if shr == shl => Node::DecFromTheRightAndClear(shr),
-                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl)]
-                    if shr == shl => Node::DecFromTheRightAndClear(shr),
+
+                    &[Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl), Node::Dec(1)] if shr == shl => {
+                        Node::AddToTheRightAndClear(shr)
+                    },
+                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl)] if shr == shl => {
+                        Node::AddToTheRightAndClear(shr)
+                    },
+
+                    &[Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl), Node::Dec(1)] if shr == shl => {
+                        Node::DecFromTheRightAndClear(shr)
+                    },
+                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl)] if shr == shl => {
+                        Node::DecFromTheRightAndClear(shr)
+                    },
+
+                    &[Node::DecTapePos(shl), Node::Inc(1), Node::IncTapePos(shr), Node::Dec(1)] if shr == shl => {
+                        Node::AddToTheLeftAndClear(shl)
+                    },
+                    &[Node::Dec(1), Node::DecTapePos(shl), Node::Inc(1), Node::IncTapePos(shr)] if shr == shl => {
+                        Node::AddToTheLeftAndClear(shl)
+                    },
+
+                    &[Node::DecTapePos(shl), Node::Dec(1), Node::IncTapePos(shr), Node::Dec(1)] if shr == shl => {
+                        Node::DecFromTheLeftAndClear(shl)
+                    },
+                    &[Node::Dec(1), Node::DecTapePos(shl), Node::Dec(1), Node::IncTapePos(shr)] if shr == shl => {
+                        Node::DecFromTheLeftAndClear(shl)
+                    },
+
                     _ => Node::Loop(nodes.iter().map(|it| it.optimize_loops()).collect())
                 }
             }
             _ => self.clone()
         }
     }
+
     pub fn linearize(&self) -> Vec<SimOperation> {
         let mut new_tree = NumberedNode::try_from(self).unwrap();
         let capacity = NumberedNode::numerize(&mut new_tree);
         NumberedNode::linearize(&new_tree, capacity)
-    }
-    fn is_clear_node(&self) -> bool {
-        if let Node::Clear = self { true } else { false }
     }
 }
 

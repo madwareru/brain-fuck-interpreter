@@ -181,8 +181,7 @@ mod interpreter {
         }
 
         fn eval(&mut self, ops: &[SimOperation], start_id: usize, end_id: usize) {
-            for i in start_id..=end_id {
-                let node = ops[i];
+            for &node in &ops[start_id..=end_id] {
                 match node {
                     SimOperation::Inc(amount) => {
                         self.tape[self.tape_pos] = self.tape[self.tape_pos].wrapping_add(amount) ;
@@ -211,18 +210,29 @@ mod interpreter {
                     SimOperation::Clear => {
                         self.tape[self.tape_pos] = 0;
                     }
-                    SimOperation::Set(amount) => {
-                        self.tape[self.tape_pos] = amount;
-                    }
                     SimOperation::AddToTheRightAndClear(offset) => {
+                        let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
                         self.tape[self.tape_pos + offset] =
-                            self.tape[self.tape_pos + offset].wrapping_add(self.tape[self.tape_pos]);
-                        self.tape[self.tape_pos] = 0;
+                            self.tape[self.tape_pos + offset].wrapping_add(amount);
                     }
                     SimOperation::DecFromTheRightAndClear(offset) => {
+                        let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
                         self.tape[self.tape_pos + offset] =
-                            self.tape[self.tape_pos + offset].wrapping_sub(self.tape[self.tape_pos]);
-                        self.tape[self.tape_pos] = 0;
+                            self.tape[self.tape_pos + offset].wrapping_sub(amount);
+                    }
+                    SimOperation::AddToTheLeftAndClear(offset) => {
+                        if self.tape[self.tape_pos] != 0 {
+                            let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
+                            self.tape[self.tape_pos - offset] =
+                                self.tape[self.tape_pos - offset].wrapping_add(amount);
+                        }
+                    }
+                    SimOperation::DecFromTheLeftAndClear(offset) => {
+                        if self.tape[self.tape_pos] != 0 {
+                            let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
+                            self.tape[self.tape_pos - offset] =
+                                self.tape[self.tape_pos - offset].wrapping_sub(amount);
+                        }
                     }
                     SimOperation::Loop { start_id, end_id } => {
                         while self.tape[self.tape_pos] != 0 {
