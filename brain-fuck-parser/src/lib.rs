@@ -158,14 +158,16 @@ impl NumberedNode {
         while let Some(next_node) = queue.pop_front() {
             match next_node {
                 NumberedNode::Loop { operations, id } => {
-                    if !operations.is_empty() {
-                        let start_id = operations.first().unwrap().get_id();
-                        let end_id = operations.last().unwrap().get_id();
-                        result[*id] = SimOperation::Loop { start_id, end_id };
-
-                        for op_node in operations.iter() {
-                            queue.push_back(op_node);
+                    match (operations.first(), operations.last()) {
+                        (Some(fst), Some(lst)) => {
+                            let start_id = fst.get_id();
+                            let end_id = lst.get_id();
+                            result[*id] = SimOperation::Loop { start_id, end_id };
+                            for node in operations.iter() {
+                                queue.push_back(node);
+                            }
                         }
+                        _ => ()
                     }
                 }
                 NumberedNode::Operation { data, id } => {
