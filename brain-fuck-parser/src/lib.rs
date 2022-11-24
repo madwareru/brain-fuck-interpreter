@@ -27,20 +27,22 @@ pub enum Node {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum SimOperation {
+    Noop,
     Inc(u8),
     Dec(u8),
-    IncTapePos(usize),
-    DecTapePos(usize),
+    IncTapePos(u32),
+    DecTapePos(u32),
     IncTapePosUntilEmpty,
     DecTapePosUntilEmpty,
     PutChar,
     GetChar,
     Clear,
-    AddToTheRightAndClear(usize),
-    DecFromTheRightAndClear(usize),
-    AddToTheLeftAndClear(usize),
-    DecFromTheLeftAndClear(usize),
-    Loop{ start_id: usize, end_id: usize },
+    AddToTheRightAndClear(u32),
+    DecFromTheRightAndClear(u32),
+    AddToTheLeftAndClear(u32),
+    DecFromTheLeftAndClear(u32),
+    JnzSaveIP { target_ip: u32 },
+    JnzRestoreIP { target_ip: u32 },
     EndProgram
 }
 
@@ -60,63 +62,67 @@ impl NumberedNode {
         }
     }
 
-    fn try_from(source: &Node) -> Option<Self> {
+    fn from(source: &Node) -> Self {
         match source {
             Node::Root(nodes) => {
                 let mut nodes: Vec<NumberedNode> = nodes
                     .iter()
-                    .filter_map(|it| NumberedNode::try_from(it))
+                    .map(|it| NumberedNode::from(it))
                     .collect();
                 nodes.push(NumberedNode::Operation { id: 0, data: SimOperation::EndProgram });
-                Some(Self::Root(nodes))
+                Self::Root(nodes)
             }
             Node::Inc(amount) => {
-                Some(Self::Operation { id: 0, data: SimOperation::Inc(*amount) })
+                Self::Operation { id: 0, data: SimOperation::Inc(*amount) }
             }
             Node::Dec(amount) => {
-                Some(Self::Operation { id: 0, data: SimOperation::Dec(*amount) })
+                Self::Operation { id: 0, data: SimOperation::Dec(*amount) }
             }
             Node::IncTapePos(offset) => {
-                Some(Self::Operation { id: 0, data: SimOperation::IncTapePos(*offset) })
+                Self::Operation { id: 0, data: SimOperation::IncTapePos(*offset as u32) }
             }
             Node::DecTapePos(offset) => {
-                Some(Self::Operation { id: 0, data: SimOperation::DecTapePos(*offset) })
+                Self::Operation { id: 0, data: SimOperation::DecTapePos(*offset as u32) }
             }
             Node::IncTapePosUntilEmpty => {
-                Some(Self::Operation { id: 0, data: SimOperation::IncTapePosUntilEmpty })
+                Self::Operation { id: 0, data: SimOperation::IncTapePosUntilEmpty }
             }
             Node::DecTapePosUntilEmpty => {
-                Some(Self::Operation { id: 0, data: SimOperation::DecTapePosUntilEmpty })
+                Self::Operation { id: 0, data: SimOperation::DecTapePosUntilEmpty }
             }
             Node::PutChar => {
-                Some(Self::Operation { id: 0, data: SimOperation::PutChar })
+                Self::Operation { id: 0, data: SimOperation::PutChar }
             }
             Node::GetChar => {
-                Some(Self::Operation { id: 0, data: SimOperation::GetChar })
+                Self::Operation { id: 0, data: SimOperation::GetChar }
             }
             Node::Clear => {
-                Some(Self::Operation { id: 0, data: SimOperation::Clear })
+                Self::Operation { id: 0, data: SimOperation::Clear }
             }
             Node::AddToTheRightAndClear(offset) => {
-                Some(Self::Operation { id: 0, data: SimOperation::AddToTheRightAndClear(*offset) })
+                Self::Operation { id: 0, data: SimOperation::AddToTheRightAndClear(*offset as u32) }
             }
             Node::DecFromTheRightAndClear(offset) => {
-                Some(Self::Operation { id: 0, data: SimOperation::DecFromTheRightAndClear(*offset) })
+                Self::Operation { id: 0, data: SimOperation::DecFromTheRightAndClear(*offset as u32) }
             }
             Node::AddToTheLeftAndClear(offset) => {
-                Some(Self::Operation { id: 0, data: SimOperation::AddToTheLeftAndClear(*offset) })
+                Self::Operation { id: 0, data: SimOperation::AddToTheLeftAndClear(*offset as u32) }
             }
             Node::DecFromTheLeftAndClear(offset) => {
-                Some(Self::Operation { id: 0, data: SimOperation::DecFromTheLeftAndClear(*offset) })
+                Self::Operation { id: 0, data: SimOperation::DecFromTheLeftAndClear(*offset as u32) }
             }
             Node::Loop(nodes) => {
-                let operations = nodes
+                let mut operations = nodes
                     .iter()
-                    .filter_map(|it| NumberedNode::try_from(it))
-                    .collect();
-                Some(Self::Loop { id: 0, operations })
+                    .map(|it| NumberedNode::from(it))
+                    .collect::<Vec<_>>();
+                operations.push( NumberedNode::Operation {
+                    id: 0,
+                    data: SimOperation::Noop
+                });
+                Self::Loop { id: 0, operations }
             }
-            Node::Comment => None
+            _ => unreachable!()
         }
     }
 
@@ -147,27 +153,32 @@ impl NumberedNode {
         id_sequence
     }
 
-    fn linearize(root_node: &Self, capacity: usize) -> Vec<SimOperation> {
-        let mut result = vec![SimOperation::EndProgram; capacity];
+    fn linearize(root_node: &mut Self, capacity: usize) -> Vec<SimOperation> {
+        let mut result = vec![SimOperation::Noop; capacity];
         let mut queue = VecDeque::new();
         if let Self::Root(nodes) = root_node {
-            for child_node in nodes.iter() {
+            for child_node in nodes.iter_mut() {
                 queue.push_back(child_node);
             }
         }
         while let Some(next_node) = queue.pop_front() {
             match next_node {
                 NumberedNode::Loop { operations, id } => {
-                    match (operations.first(), operations.last()) {
-                        (Some(fst), Some(lst)) => {
-                            let start_id = fst.get_id();
-                            let end_id = lst.get_id();
-                            result[*id] = SimOperation::Loop { start_id, end_id };
-                            for node in operations.iter() {
-                                queue.push_back(node);
+                    let start_id = operations.first().unwrap().get_id();
+                    result[*id] = SimOperation::JnzSaveIP { target_ip: start_id as u32 };
+                    let len = operations.len();
+                    let mut i = 0;
+                    for node in operations.iter_mut() {
+                        if i == len-1 {
+                            match node {
+                                NumberedNode::Operation { data, ..} => {
+                                    *data = SimOperation::JnzRestoreIP { target_ip: start_id as u32 };
+                                }
+                                _ => unreachable!()
                             }
                         }
-                        _ => ()
+                        queue.push_back(node);
+                        i += 1;
                     }
                 }
                 NumberedNode::Operation { data, id } => {
@@ -312,6 +323,7 @@ impl Node {
             Node::Loop(nodes) => {
                 match &nodes[..] {
                     &[Node::Dec(1)] => Node::Clear,
+                    &[Node::Inc(1)] => Node::Clear, // Eventually it will overflow to zero
                     &[Node::IncTapePos(1)] => Node::IncTapePosUntilEmpty,
                     &[Node::DecTapePos(1)] => Node::DecTapePosUntilEmpty,
 
@@ -351,19 +363,230 @@ impl Node {
     }
 
     pub fn linearize(&self) -> Vec<SimOperation> {
-        let mut new_tree = NumberedNode::try_from(self).unwrap();
+        let mut new_tree = NumberedNode::from(self);
         let capacity = NumberedNode::numerize(&mut new_tree);
-        NumberedNode::linearize(&new_tree, capacity)
+        NumberedNode::linearize(&mut new_tree, capacity)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Node, parse_bf};
+    use crate::{Node, NumberedNode, parse_bf, SimOperation};
+
+    #[test]
+    fn numerization_test() {
+        let bf = parse_bf("-+<>[-]+[>]-[<].,[+]");
+        let mut numerized_zeroed = NumberedNode::from(&bf);
+        assert_eq!(
+            &NumberedNode::Root(vec![
+                NumberedNode::Operation { id: 0, data: SimOperation::Dec(1) },
+                NumberedNode::Operation { id: 0, data: SimOperation::Inc(1) },
+                NumberedNode::Operation { id: 0, data: SimOperation::DecTapePos(1) },
+                NumberedNode::Operation { id: 0, data: SimOperation::IncTapePos(1) },
+                NumberedNode::Operation { id: 0, data: SimOperation::Clear },
+                NumberedNode::Operation { id: 0, data: SimOperation::Inc(1) },
+                NumberedNode::Operation { id: 0, data: SimOperation::IncTapePosUntilEmpty },
+                NumberedNode::Operation { id: 0, data: SimOperation::Dec(1) },
+                NumberedNode::Operation { id: 0, data: SimOperation::DecTapePosUntilEmpty },
+                NumberedNode::Operation { id: 0, data: SimOperation::PutChar },
+                NumberedNode::Operation { id: 0, data: SimOperation::GetChar },
+                NumberedNode::Operation { id: 0, data: SimOperation::Clear },
+                NumberedNode::Operation { id: 0, data: SimOperation::EndProgram },
+            ]),
+            &numerized_zeroed
+        );
+
+        NumberedNode::numerize(&mut numerized_zeroed);
+        let numerized = numerized_zeroed;
+        assert_eq!(
+            NumberedNode::Root(vec![
+                NumberedNode::Operation { id: 0, data: SimOperation::Dec(1) },
+                NumberedNode::Operation { id: 1, data: SimOperation::Inc(1) },
+                NumberedNode::Operation { id: 2, data: SimOperation::DecTapePos(1) },
+                NumberedNode::Operation { id: 3, data: SimOperation::IncTapePos(1) },
+                NumberedNode::Operation { id: 4, data: SimOperation::Clear },
+                NumberedNode::Operation { id: 5, data: SimOperation::Inc(1) },
+                NumberedNode::Operation { id: 6, data: SimOperation::IncTapePosUntilEmpty },
+                NumberedNode::Operation { id: 7, data: SimOperation::Dec(1) },
+                NumberedNode::Operation { id: 8, data: SimOperation::DecTapePosUntilEmpty },
+                NumberedNode::Operation { id: 9, data: SimOperation::PutChar },
+                NumberedNode::Operation { id: 10, data: SimOperation::GetChar },
+                NumberedNode::Operation { id: 11, data: SimOperation::Clear },
+                NumberedNode::Operation { id: 12, data: SimOperation::EndProgram },
+            ]),
+            numerized
+        );
+    }
+
+    #[test]
+    fn linearization_test() {
+        let bf = parse_bf("++[->>]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Inc(2),
+                SimOperation::Loop { start_id: 3, end_id: 4 },
+                SimOperation::EndProgram,
+                SimOperation::Dec(1),
+                SimOperation::IncTapePos(2)
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[-][>][<][+]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::Clear,
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[->+<]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::AddToTheRightAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[>+<-]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::AddToTheRightAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[->-<]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::DecFromTheRightAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[>-<-]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::DecFromTheRightAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[<+>-]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::AddToTheLeftAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[-<+>]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::AddToTheLeftAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[-<->]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::DecFromTheLeftAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[<->-]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::DecFromTheLeftAndClear(1),
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+
+        let bf = parse_bf("-+<>[-]+[>]-[<].,[+]");
+        let linearized = bf.linearize();
+        assert_eq!(
+            vec![
+                SimOperation::Dec(1),
+                SimOperation::Inc(1),
+                SimOperation::DecTapePos(1),
+                SimOperation::IncTapePos(1),
+                SimOperation::Clear,
+                SimOperation::Inc(1),
+                SimOperation::IncTapePosUntilEmpty,
+                SimOperation::Dec(1),
+                SimOperation::DecTapePosUntilEmpty,
+                SimOperation::PutChar,
+                SimOperation::GetChar,
+                SimOperation::Clear,
+                SimOperation::EndProgram
+            ],
+            linearized
+        );
+    }
 
     #[test]
     fn ensure_node_clear_converges() {
         let bf = parse_bf("[-]");
+        assert_eq!(Node::Root(vec![Node::Clear]), bf);
+
+        let bf = parse_bf("[+]");
         assert_eq!(Node::Root(vec![Node::Clear]), bf);
     }
 
@@ -373,6 +596,9 @@ mod tests {
         assert_eq!(Node::Root(vec![Node::Loop(vec![Node::PutChar])]), bf);
 
         let bf = parse_bf("[-][+]");
+        assert_eq!(Node::Root(vec![Node::Clear]), bf);
+
+        let bf = parse_bf("[+][-]");
         assert_eq!(Node::Root(vec![Node::Clear]), bf);
     }
 

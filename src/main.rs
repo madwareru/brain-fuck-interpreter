@@ -153,6 +153,7 @@ mod codegen {
 
 #[cfg(not(feature = "use_codegen"))]
 mod interpreter {
+    use std::collections::VecDeque;
     use brain_fuck_parser::{parse_bf, SimOperation};
 
     #[inline(always)]
@@ -165,7 +166,9 @@ mod interpreter {
 
     struct BfContext {
         tape: Vec<u8>,
-        tape_pos: usize
+        tape_pos: usize,
+        instruction_pointer: usize,
+        ip_stack: VecDeque<usize>
     }
 
     impl BfContext {
@@ -174,14 +177,18 @@ mod interpreter {
             (
                 Self {
                     tape: vec![0; 0x100000],
-                    tape_pos: 0
+                    tape_pos: 0,
+                    instruction_pointer: 0,
+                    ip_stack: VecDeque::new()
                 },
                 root_node.linearize()
             )
         }
 
-        fn eval(&mut self, ops: &[SimOperation], start_id: usize, end_id: usize) {
-            for &node in &ops[start_id..=end_id] {
+        fn eval(&mut self, ops: &[SimOperation]) {
+            self.instruction_pointer = 0;
+            loop {
+                let node = *unsafe { ops.get_unchecked(self.instruction_pointer) };
                 match node {
                     SimOperation::Inc(amount) => {
                         self.tape[self.tape_pos] = self.tape[self.tape_pos].wrapping_add(amount) ;
@@ -190,10 +197,10 @@ mod interpreter {
                         self.tape[self.tape_pos] = self.tape[self.tape_pos].wrapping_sub(amount);
                     }
                     SimOperation::IncTapePos(offset) => {
-                        self.tape_pos += offset;
+                        self.tape_pos += offset as usize;
                     }
                     SimOperation::DecTapePos(offset) => {
-                        self.tape_pos -= offset;
+                        self.tape_pos -= offset as usize;
                     }
                     SimOperation::IncTapePosUntilEmpty => {
                         while self.tape[self.tape_pos] != 0 { self.tape_pos += 1; }
@@ -211,38 +218,59 @@ mod interpreter {
                         self.tape[self.tape_pos] = 0;
                     }
                     SimOperation::AddToTheRightAndClear(offset) => {
-                        let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
-                        self.tape[self.tape_pos + offset] =
-                            self.tape[self.tape_pos + offset].wrapping_add(amount);
+                        self.tape[self.tape_pos + offset as usize] =
+                            self.tape[self.tape_pos + offset as usize]
+                            .wrapping_add(self.tape[self.tape_pos]);
+                        self.tape[self.tape_pos] = 0;
                     }
                     SimOperation::DecFromTheRightAndClear(offset) => {
-                        let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
-                        self.tape[self.tape_pos + offset] =
-                            self.tape[self.tape_pos + offset].wrapping_sub(amount);
+                        self.tape[self.tape_pos + offset as usize] =
+                            self.tape[self.tape_pos + offset as usize]
+                            .wrapping_sub(self.tape[self.tape_pos]);
+                        self.tape[self.tape_pos] = 0
                     }
                     SimOperation::AddToTheLeftAndClear(offset) => {
                         if self.tape[self.tape_pos] != 0 {
-                            let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
-                            self.tape[self.tape_pos - offset] =
-                                self.tape[self.tape_pos - offset].wrapping_add(amount);
+                            self.tape[self.tape_pos - offset as usize] =
+                                self.tape[self.tape_pos - offset as usize]
+                                .wrapping_add(self.tape[self.tape_pos]);
+                            self.tape[self.tape_pos] = 0;
                         }
                     }
                     SimOperation::DecFromTheLeftAndClear(offset) => {
                         if self.tape[self.tape_pos] != 0 {
-                            let amount = std::mem::replace(&mut self.tape[self.tape_pos], 0);
-                            self.tape[self.tape_pos - offset] =
-                                self.tape[self.tape_pos - offset].wrapping_sub(amount);
+                            self.tape[self.tape_pos - offset as usize] =
+                                self.tape[self.tape_pos - offset as usize]
+                                .wrapping_sub(self.tape[self.tape_pos]);
+                            self.tape[self.tape_pos] = 0;
                         }
                     }
-                    SimOperation::Loop { start_id, end_id } => {
-                        while self.tape[self.tape_pos] != 0 {
-                            self.eval(ops, start_id, end_id);
+                    SimOperation::JnzSaveIP { target_ip } => {
+                        if self.tape[self.tape_pos] != 0 {
+                            self.ip_stack.push_back(self.instruction_pointer + 1);
+                            self.instruction_pointer = target_ip as usize;
+                            continue;
                         }
                     }
+                    SimOperation::JnzRestoreIP { target_ip } => {
+                        if self.tape[self.tape_pos] != 0 {
+                            self.instruction_pointer = target_ip as usize;
+                        } else {
+                            match self.ip_stack.pop_back() {
+                                None => return,
+                                Some(ip) => {
+                                    self.instruction_pointer = ip as usize;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    SimOperation::Noop => {}
                     SimOperation::EndProgram => {
                         return;
                     }
                 }
+                self.instruction_pointer += 1;
             }
         }
     }
@@ -253,7 +281,7 @@ mod interpreter {
 
     fn run(code: &str) {
         let (mut ctx, sim_ops) = BfContext::parse(code);
-        ctx.eval(&sim_ops, 0, sim_ops.len()-1);
+        ctx.eval(&sim_ops);
     }
 }
 
