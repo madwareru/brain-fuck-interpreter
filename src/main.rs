@@ -181,7 +181,7 @@ mod interpreter {
                     instruction_pointer: 0,
                     ip_stack: VecDeque::new()
                 },
-                root_node.linearize()
+                root_node.compile_bytecode()
             )
         }
 

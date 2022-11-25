@@ -327,31 +327,63 @@ impl Node {
                     &[Node::IncTapePos(1)] => Node::IncTapePosUntilEmpty,
                     &[Node::DecTapePos(1)] => Node::DecTapePosUntilEmpty,
 
-                    &[Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl), Node::Dec(1)] if shr == shl => {
+                    &[Node::IncTapePos(shr),
+                    Node::Inc(1),
+                    Node::DecTapePos(shl),
+                    Node::Dec(1)
+                    ] if shr == shl => {
                         Node::AddToTheRightAndClear(shr)
                     },
-                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Inc(1), Node::DecTapePos(shl)] if shr == shl => {
+                    &[Node::Dec(1),
+                    Node::IncTapePos(shr),
+                    Node::Inc(1),
+                    Node::DecTapePos(shl)
+                    ] if shr == shl => {
                         Node::AddToTheRightAndClear(shr)
                     },
 
-                    &[Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl), Node::Dec(1)] if shr == shl => {
+                    &[Node::IncTapePos(shr),
+                      Node::Dec(1),
+                      Node::DecTapePos(shl),
+                      Node::Dec(1)
+                    ] if shr == shl => {
                         Node::DecFromTheRightAndClear(shr)
                     },
-                    &[Node::Dec(1), Node::IncTapePos(shr), Node::Dec(1), Node::DecTapePos(shl)] if shr == shl => {
+                    &[Node::Dec(1),
+                    Node::IncTapePos(shr),
+                    Node::Dec(1),
+                    Node::DecTapePos(shl)
+                    ] if shr == shl => {
                         Node::DecFromTheRightAndClear(shr)
                     },
 
-                    &[Node::DecTapePos(shl), Node::Inc(1), Node::IncTapePos(shr), Node::Dec(1)] if shr == shl => {
+                    &[Node::DecTapePos(shl),
+                    Node::Inc(1),
+                    Node::IncTapePos(shr),
+                    Node::Dec(1)
+                    ] if shr == shl => {
                         Node::AddToTheLeftAndClear(shl)
                     },
-                    &[Node::Dec(1), Node::DecTapePos(shl), Node::Inc(1), Node::IncTapePos(shr)] if shr == shl => {
+                    &[Node::Dec(1),
+                    Node::DecTapePos(shl),
+                    Node::Inc(1),
+                    Node::IncTapePos(shr)
+                    ] if shr == shl => {
                         Node::AddToTheLeftAndClear(shl)
                     },
 
-                    &[Node::DecTapePos(shl), Node::Dec(1), Node::IncTapePos(shr), Node::Dec(1)] if shr == shl => {
+                    &[Node::DecTapePos(shl),
+                    Node::Dec(1),
+                    Node::IncTapePos(shr),
+                    Node::Dec(1)
+                    ] if shr == shl => {
                         Node::DecFromTheLeftAndClear(shl)
                     },
-                    &[Node::Dec(1), Node::DecTapePos(shl), Node::Dec(1), Node::IncTapePos(shr)] if shr == shl => {
+                    &[Node::Dec(1),
+                    Node::DecTapePos(shl),
+                    Node::Dec(1),
+                    Node::IncTapePos(shr)
+                    ] if shr == shl => {
                         Node::DecFromTheLeftAndClear(shl)
                     },
 
@@ -362,7 +394,7 @@ impl Node {
         }
     }
 
-    pub fn linearize(&self) -> Vec<SimOperation> {
+    pub fn compile_bytecode(&self) -> Vec<SimOperation> {
         let mut new_tree = NumberedNode::from(self);
         let capacity = NumberedNode::numerize(&mut new_tree);
         NumberedNode::linearize(&mut new_tree, capacity)
@@ -421,20 +453,21 @@ mod tests {
     #[test]
     fn linearization_test() {
         let bf = parse_bf("++[->>]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Inc(2),
-                SimOperation::Loop { start_id: 3, end_id: 4 },
+                SimOperation::JnzSaveIP { target_ip: 3 },
                 SimOperation::EndProgram,
                 SimOperation::Dec(1),
-                SimOperation::IncTapePos(2)
+                SimOperation::IncTapePos(2),
+                SimOperation::JnzRestoreIP { target_ip: 3 }
             ],
             linearized
         );
 
         let bf = parse_bf("-+<>[-][>][<][+]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -448,7 +481,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[->+<]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -462,7 +495,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[>+<-]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -476,7 +509,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[->-<]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -490,7 +523,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[>-<-]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -504,7 +537,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[<+>-]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -518,7 +551,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[-<+>]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -532,7 +565,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[-<->]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -546,7 +579,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[<->-]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
@@ -560,7 +593,7 @@ mod tests {
         );
 
         let bf = parse_bf("-+<>[-]+[>]-[<].,[+]");
-        let linearized = bf.linearize();
+        let linearized = bf.compile_bytecode();
         assert_eq!(
             vec![
                 SimOperation::Dec(1),
